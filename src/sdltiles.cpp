@@ -65,6 +65,7 @@
 #include "overmap_ui.h"
 #include "overmapbuffer.h"
 #include "path_info.h"
+#include "rt_profile.h"
 #include "sdl_geometry.h"
 #include "sdl_wrappers.h"
 #include "sdl_font.h"
@@ -538,12 +539,14 @@ SDL_Rect get_android_render_rect( float DisplayBufferWidth, float DisplayBufferH
 
 void refresh_display()
 {
+    RT_PROFILE_SCOPE( "sdl: present frame" );
     needupdate = false;
     lastupdate = SDL_GetTicks();
 
     if( test_mode ) {
         return;
     }
+    rt_profile::count_frame();
 
     // Select default target (the window), copy rendered buffer
     // there, present it, select the buffer as target again.
@@ -3958,14 +3961,22 @@ input_event input_manager::get_input_event( const keyboard_mode preferred_keyboa
     }
 
     if( inputdelay < 0 ) {
+        // Polling, not blocking: this loop wakes up every millisecond to ask SDL
+        // whether anything happened, so an idle game still costs the machine
+        // something. How much is what "sdl: poll for input" measures - and the
+        // profile keeps printing while we sit here, because tick() is called from
+        // inside the wait rather than once a turn.
+        RT_PROFILE_SCOPE( "sdl: poll for input" );
         do {
             CheckMessages();
             if( last_input.type != input_event_t::error ) {
                 break;
             }
+            rt_profile::tick();
             SDL_Delay( 1 );
         } while( last_input.type == input_event_t::error );
     } else if( inputdelay > 0 ) {
+        RT_PROFILE_SCOPE( "sdl: poll for input" );
         uint32_t starttime = SDL_GetTicks();
         uint32_t endtime = 0;
         bool timedout = false;
@@ -3975,6 +3986,7 @@ input_event input_manager::get_input_event( const keyboard_mode preferred_keyboa
             if( last_input.type != input_event_t::error ) {
                 break;
             }
+            rt_profile::tick();
             SDL_Delay( 1 );
             timedout = endtime >= starttime + inputdelay;
             if( timedout ) {

@@ -9,6 +9,7 @@
 // IWYU pragma: no_include <sys/signal.h>
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <clocale>
 #include <cstdio>
 #include <cstdlib>
@@ -55,6 +56,7 @@
 #include "output.h"
 #include "path_info.h"
 #include "rng.h"
+#include "rt_profile.h"
 #include "system_locale.h"
 #include "translations.h"
 #include "type_id.h"
@@ -145,6 +147,10 @@ void exit_handler( int s )
     const int old_timeout = inp_mngr.get_timeout();
     inp_mngr.reset_timeout();
     if( s != 2 || query_yn( _( "Really Quit?  All unsaved changes will be lost." ) ) ) {
+        // Before the game object goes: the last interval is usually the shutdown
+        // itself, and a profile that stops one interval short of the end is a
+        // profile that never covers quitting.
+        rt_profile::shutdown();
         deinitDebug();
 
         int exit_status = 0;
@@ -429,6 +435,30 @@ cli_opts parse_commandline( int argc, const char **argv )
                 [&result]( int, const char ** ) -> int {
                     result.disable_ascii_art = true;
                     return 0;
+                }
+            },
+            {
+                "--rt-profile", "[seconds]",
+                "RT fork: print where the time goes, every <seconds> (default 2). "
+                "Opens a console window and writes rt-profile.log.",
+                section_default,
+                0,
+                []( int num_args, const char **params ) -> int {
+                    double seconds = 2.0;
+                    // The interval is optional: a bare --rt-profile is the common case,
+                    // and consuming the next argument when it is another flag would
+                    // swallow it.
+                    int consumed = 0;
+                    if( num_args > 0 && params[0][0] != '-' ) {
+                        try {
+                            seconds = std::stod( params[0] );
+                            consumed = 1;
+                        } catch( const std::exception & ) {
+                            seconds = 2.0;
+                        }
+                    }
+                    rt_profile::enable( std::chrono::duration<double>( seconds ) );
+                    return consumed;
                 }
             }
         }

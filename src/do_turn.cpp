@@ -61,6 +61,7 @@
 #include "point.h"
 #include "popup.h"
 #include "rng.h"
+#include "rt_profile.h"
 #include "scent_map.h"
 #include "sdlsound.h"
 #include "simple_pathfinding.h"
@@ -454,6 +455,12 @@ void overmap_npc_move()
 // Returns true if game is over (death, saved, quit, etc)
 bool do_turn()
 {
+    RT_PROFILE_SCOPE( "do_turn" );
+    // The report is printed from here and from the input poll, so that it keeps
+    // coming while the game sits waiting for a key and no turn ever completes.
+    rt_profile::count_turn();
+    rt_profile::tick();
+
     if( g->is_game_over() ) {
         return turn_handler::cleanup_at_end();
     }
@@ -576,6 +583,7 @@ bool do_turn()
                 sounds::process_sound_markers( &u );
                 if( !u.activity && g->uquit != QUIT_WATCH
                     && ( !u.has_distant_destination() || calendar::once_every( 10_seconds ) ) ) {
+                    RT_PROFILE_SCOPE( "ui: redraw" );
                     g->wait_popup_reset();
                     ui_manager::redraw();
                 }
@@ -585,9 +593,14 @@ bool do_turn()
                     g->queue_screenshot = false;
                 }
 
-                if( g->handle_action() ) {
-                    ++g->moves_since_last_save;
-                    u.action_taken();
+                {
+                    // Inclusive of waiting for the keyboard, which is the point:
+                    // an idle game that is nonetheless busy shows up right here.
+                    RT_PROFILE_SCOPE( "input: handle_action" );
+                    if( g->handle_action() ) {
+                        ++g->moves_since_last_save;
+                        u.action_taken();
+                    }
                 }
 
                 if( g->is_game_over() ) {
@@ -648,22 +661,43 @@ bool do_turn()
     scent.update( u.pos_bub(), m );
 
     // We need floor cache before checking falling 'n stuff
-    m.build_floor_caches();
+    {
+        RT_PROFILE_SCOPE( "map: floor caches" );
+        m.build_floor_caches();
+    }
 
     m.process_falling();
-    m.vehmove();
-    m.process_fields();
-    m.process_items();
+    {
+        RT_PROFILE_SCOPE( "vehicles: vehmove" );
+        m.vehmove();
+    }
+    {
+        RT_PROFILE_SCOPE( "map: fields" );
+        m.process_fields();
+    }
+    {
+        RT_PROFILE_SCOPE( "map: items" );
+        m.process_items();
+    }
     explosion_handler::process_explosions();
     m.creature_in_field( u );
 
     // Apply sounds from previous turn to monster and NPC AI.
-    sounds::process_sounds();
+    {
+        RT_PROFILE_SCOPE( "sounds" );
+        sounds::process_sounds();
+    }
     const int levz = m.get_abs_sub().z();
     // Update vision caches for monsters. If this turns out to be expensive,
     // consider a stripped down cache just for monsters.
-    m.build_map_cache( levz, true );
-    monmove();
+    {
+        RT_PROFILE_SCOPE( "map: vision cache" );
+        m.build_map_cache( levz, true );
+    }
+    {
+        RT_PROFILE_SCOPE( "monmove" );
+        monmove();
+    }
     if( calendar::once_every( time_between_npc_OM_moves ) ) {
         overmap_npc_move();
     }
