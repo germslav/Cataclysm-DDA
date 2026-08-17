@@ -551,6 +551,42 @@ class cata_tiles
                            lit_level ll, bool apply_night_vision_goggles, int retract, int &height_3d,
                            const point &offset );
 
+        /**
+         * RT fork: sub-tile displacement of the entity currently being drawn.
+         *
+         * Applied in draw_sprite_at on top of the per-sprite offset, so it reaches
+         * every sprite an entity is made of - body, worn overlays, effects, a rider
+         * on a mount - without threading a parameter through each of them. Those
+         * sprites have to share one displacement or they come apart visually, which
+         * is the real argument for putting it here rather than in the signatures.
+         *
+         * Expressed in tileset-native pixels, the same units as tile_type::offset,
+         * because draw_sprite_at scales the sum by tile_width / get_tile_width().
+         * Passing screen pixels would scale twice.
+         */
+        point entity_draw_offset = point::zero;
+
+        /** Sets @ref entity_draw_offset for a scope and restores it on the way out. */
+        class scoped_entity_offset
+        {
+            public:
+                scoped_entity_offset( cata_tiles &tiles, const point &offset )
+                    : tiles_( tiles ), saved_( tiles.entity_draw_offset ) {
+                    tiles_.entity_draw_offset = offset;
+                }
+                ~scoped_entity_offset() {
+                    tiles_.entity_draw_offset = saved_;
+                }
+                scoped_entity_offset( const scoped_entity_offset & ) = delete;
+                scoped_entity_offset &operator=( const scoped_entity_offset & ) = delete;
+            private:
+                cata_tiles &tiles_;
+                point saved_;
+        };
+
+        /** Sub-tile displacement of a creature, in tileset-native pixels. */
+        point entity_offset_for( const Creature &critter ) const;
+
         /* Tile Picking */
         void get_tile_values( int t, const std::array<int, 4> &tn, int &subtile, int &rotation,
                               char rotation_targets );

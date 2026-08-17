@@ -3041,9 +3041,11 @@ bool cata_tiles::draw_sprite_at(
                                  );
     SDL_Rect destination;
     // Using divide_round_down because the offset might be negative.
-    destination.x = p.x + divide_round_down( ( tile_offset.x + offset.x ) * tile_width,
+    destination.x = p.x + divide_round_down( ( tile_offset.x + offset.x + entity_draw_offset.x ) *
+                    tile_width,
                     tileset_ptr->get_tile_width() );
-    destination.y = p.y + divide_round_down( ( tile_offset.y + offset.y - height_3d ) * tile_width,
+    destination.y = p.y + divide_round_down( ( tile_offset.y + offset.y + entity_draw_offset.y -
+                                             height_3d ) * tile_width,
                     tileset_ptr->get_tile_width() );
     destination.w = width * tile_width * tile.pixelscale / tileset_ptr->get_tile_width();
     destination.h = height * tile_height * tile.pixelscale / tileset_ptr->get_tile_height();
@@ -4042,6 +4044,18 @@ bool cata_tiles::draw_critter_at_below( const tripoint_bub_ms &p, const lit_leve
     return true;
 }
 
+point cata_tiles::entity_offset_for( const Creature &critter ) const
+{
+    const point_f off = offset_from_tile_centre( critter.pos_abs_f() );
+    // Tileset-native pixels: draw_sprite_at scales by tile_width / get_tile_width(),
+    // and uses that same ratio for the vertical axis, so both components convert
+    // through the native tile width. Matching the existing convention matters more
+    // than being independently right about a non-square tileset.
+    const int native = tileset_ptr ? tileset_ptr->get_tile_width() : 1;
+    return point( static_cast<int>( std::lround( off.x * native ) ),
+                  static_cast<int>( std::lround( off.y * native ) ) );
+}
+
 bool cata_tiles::draw_critter_at( const tripoint_bub_ms &p, lit_level ll, int &height_3d,
                                   const std::array<bool, 5> &invisible, const bool memorize_only )
 {
@@ -4057,6 +4071,13 @@ bool cata_tiles::draw_critter_at( const tripoint_bub_ms &p, lit_level ll, int &h
     Creature::Attitude attitude;
     Character &you = get_player_character();
     const Creature *pcritter = get_creature_tracker().creature_at( p, true );
+    // RT fork: draw the creature from its continuous position rather than the tile
+    // it occupies. The guard covers the whole body of this function, so overlays,
+    // effects and a mounted rider all move with it. While the integer position is
+    // still the authority a creature sits at the centre of its tile and this is
+    // zero, which is what makes the output identical for now.
+    const scoped_entity_offset entity_offset( *this,
+            pcritter ? entity_offset_for( *pcritter ) : point::zero );
     const bool always_visible = pcritter && pcritter->has_flag( mon_flag_ALWAYS_VISIBLE );
     const auto override = monster_override.find( p );
     if( override != monster_override.end() ) {
