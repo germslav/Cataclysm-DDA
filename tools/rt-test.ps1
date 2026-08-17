@@ -18,6 +18,12 @@ param(
     [switch]$Baseline
 )
 
+# Per-test assertion counts are written alongside the XML. Catch2 reports assertion
+# counts per section and per run but not per test case, so when a run's total moves
+# there is otherwise no way to find out which test moved it - and the count is a
+# measure of how much work the game did, so it moves when behaviour changes even
+# though every test still passes. Compare two of these with Compare-AssertionStats.
+
 $ErrorActionPreference = "Stop"
 
 $RepoRoot     = Split-Path -Parent $PSScriptRoot
@@ -35,6 +41,7 @@ New-Item -ItemType Directory -Force -Path $ResultsDir | Out-Null
 $stamp    = Get-Date -Format "yyyyMMdd-HHmmss"
 $outXml   = if ($Baseline) { $BaselineXml } else { Join-Path $ResultsDir "run-$stamp.xml" }
 $outTxt   = if ($Baseline) { $BaselineTxt } else { Join-Path $ResultsDir "run-$stamp.txt" }
+$outStats = [System.IO.Path]::ChangeExtension($outXml, ".stats.tsv")
 $userDir  = Join-Path $env:TEMP "cdda-rt-test-user\"
 
 # Catch2 must run with the repo root as the working directory so the game finds data/.
@@ -46,6 +53,7 @@ try {
         "--rng-seed", $Seed,
         "--order", "lex",
         "--user-dir=$userDir",
+        "--rt-assertion-stats", $outStats,
         "--reporter", "xml",
         "--out", $outXml
     )
@@ -97,6 +105,42 @@ $lines = Get-TestCases $outXml |
     ForEach-Object { "{0,-8} {1}" -f $(if ($_.OverallResult.success -eq "true") { "ok" } else { "FAILED" }), $_.name }
 [System.IO.File]::WriteAllLines($outTxt, $lines)
 
+# Reports which tests executed a different number of assertions than a previous run.
+# Same set of tests, same seed, same source: a difference means the game did a
+# different amount of work inside that test, which a green run does not otherwise show.
+function Compare-AssertionStats([string]$oldTsv, [string]$newTsv) {
+    if (-not (Test-Path $oldTsv) -or -not (Test-Path $newTsv)) { return }
+
+    function Read-Stats([string]$path) {
+        $map = @{}
+        foreach ($line in Get-Content $path) {
+            $parts = $line -split "`t", 3
+            if ($parts.Count -eq 3) { $map[$parts[2]] = [long]$parts[0] }
+        }
+        return $map
+    }
+
+    $old = Read-Stats $oldTsv
+    $new = Read-Stats $newTsv
+    $moved = foreach ($name in $new.Keys) {
+        if ($old.ContainsKey($name) -and $old[$name] -ne $new[$name]) {
+            [PSCustomObject]@{ Test = $name; Was = $old[$name]; Now = $new[$name]; Delta = $new[$name] - $old[$name] }
+        }
+    }
+    $moved = @($moved | Sort-Object { [math]::Abs($_.Delta) } -Descending)
+
+    Write-Host ""
+    Write-Host "--- assertion counts vs $(Split-Path -Leaf $oldTsv) ---"
+    if (-not $moved.Count) {
+        Write-Host "Every test shared with that run executed the same number of assertions."
+        return
+    }
+    Write-Host "$($moved.Count) test(s) did a different amount of work (total $(($moved | Measure-Object Delta -Sum).Sum | ForEach-Object { '{0:+#;-#;0}' -f $_ })):"
+    $moved | Select-Object -First 20 | ForEach-Object {
+        Write-Host ("  {0,+12} {1}  ({2} -> {3})" -f ('{0:+#;-#;0}' -f $_.Delta), $_.Test, $_.Was, $_.Now)
+    }
+}
+
 if ($Baseline) {
     $failed = @(Get-FailedTestNames $BaselineXml)
     Write-Host ""
@@ -124,6 +168,14 @@ Write-Host "baseline failures: $($baseFailed.Count)   this run: $($nowFailed.Cou
 if ($fixed.Count) {
     Write-Host "no longer failing ($($fixed.Count)):" -ForegroundColor Green
     $fixed | ForEach-Object { Write-Host "  + $_" -ForegroundColor Green }
+}
+
+# Against the most recent earlier run that carries per-test counts. The S0b baseline
+# predates them, so there is nothing to compare against until two such runs exist.
+$previousStats = @(Get-ChildItem $ResultsDir -Filter "*.stats.tsv" |
+        Where-Object { $_.FullName -ne $outStats } | Sort-Object LastWriteTime -Descending)
+if ($previousStats.Count) {
+    Compare-AssertionStats $previousStats[0].FullName $outStats
 }
 
 if ($regressions.Count) {

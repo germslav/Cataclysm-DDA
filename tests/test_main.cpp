@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <ostream>
@@ -69,6 +70,22 @@ static bool error_during_initialization{ false };
 static bool fail_to_init_game_state{ false };
 
 static bool needs_game{ false };
+
+/**
+ * RT fork: --rt-assertion-stats writes one line per test case with the number of
+ * assertions it executed.
+ *
+ * Catch2's XML report carries assertion counts per section and per run, but not
+ * per test case, so a run whose total moved gives no way to find out which test
+ * moved it. That matters here because a test case's assertion count is a measure
+ * of how much work the game did inside it: a loop that runs until a monster dies
+ * counts one assertion per iteration, so the count changes when behaviour changes
+ * even though the test still passes and its source never moved. Diffing these
+ * files between two builds points at the tests that started doing something
+ * different.
+ */
+static std::string assertion_stats_path;
+static std::ofstream assertion_stats_stream;
 
 static std::vector<mod_id> extract_mod_selection( const std::string_view mod_string )
 {
@@ -221,8 +238,22 @@ struct CataListener : Catch::TestEventListenerBase {
         end_time = start_time = std::chrono::system_clock::now();
     }
 
+    void testCaseEnded( Catch::TestCaseStats const &stats ) override {
+        TestEventListenerBase::testCaseEnded( stats );
+        if( assertion_stats_stream.is_open() ) {
+            // Catch2 hands the listener the delta for this test case, not the
+            // running total, so this is what this test alone executed.
+            assertion_stats_stream << stats.totals.assertions.passed << '\t'
+                                   << stats.totals.assertions.failed << '\t'
+                                   << stats.testInfo.name << '\n';
+        }
+    }
+
     void testRunEnded( Catch::TestRunStats const & ) override {
         end_time = std::chrono::system_clock::now();
+        if( assertion_stats_stream.is_open() ) {
+            assertion_stats_stream.flush();
+        }
     }
 
     void sectionStarting( Catch::SectionInfo const &sectionInfo ) override {
@@ -346,6 +377,9 @@ int main( int argc, const char *argv[] )
                  | Opt( limit_debug_level, "number" )
                  ["--set-debug-level-mask"]
                  ( "[CataclysmDDA] Set debug level bitmask - see `enum DebugLevel` in src/debug.h for individual bits definition" )
+                 | Opt( assertion_stats_path, "filename" )
+                 ["--rt-assertion-stats"]
+                 ( "[RT fork] Write per-test assertion counts to this file, for diffing one run against another." )
                  ;
     session.cli( cli );
 
@@ -397,6 +431,14 @@ int main( int argc, const char *argv[] )
 
     // NOLINTNEXTLINE(cata-tests-must-restore-global-state)
     test_mode = true;
+
+    if( !assertion_stats_path.empty() ) {
+        assertion_stats_stream.open( assertion_stats_path );
+        if( !assertion_stats_stream ) {
+            printf( "Could not open %s for assertion stats\n", assertion_stats_path.c_str() );
+            return EXIT_FAILURE;
+        }
+    }
 
     on_out_of_scope print_newline( []() {
         printf( "\n" );
