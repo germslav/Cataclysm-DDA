@@ -13,6 +13,7 @@
 #include "coordinates.h"
 #include "creature.h"
 #include "memory_fast.h"
+#include "monster_spatial_index.h"
 #include "type_id.h"
 
 class JsonArray;
@@ -123,6 +124,22 @@ class creature_tracker
             return monsters_list;
         }
 
+        /**
+         * RT fork: the monsters within @p radius of a point, on its z-level.
+         *
+         * The question the tile map could not answer without probing tile by tile,
+         * and the reason the index underneath is spatial. Distance is measured
+         * between continuous positions, so this is a circle rather than a square
+         * of tiles; dead monsters and hallucinations are included, since what
+         * counts as a target depends on who is asking.
+         *
+         * Monsters only. The avatar and the NPCs are not in the index - creature_at
+         * still finds them by scanning - so a caller that needs every creature has
+         * to check them separately, as it does today.
+         */
+        std::vector<monster *> monsters_overlapping( const tripoint_abs_ms_f &centre,
+                double radius ) const;
+
         void serialize( JsonOut &jsout ) const;
         void deserialize( const JsonArray &ja );
 
@@ -146,8 +163,14 @@ class creature_tracker
 
         std::list<shared_ptr_fast<npc>> active_npc; // NOLINT(cata-serialize)
         std::vector<shared_ptr_fast<monster>> monsters_list;
-        // NOLINTNEXTLINE(cata-serialize)
-        std::unordered_map<tripoint_abs_ms, shared_ptr_fast<monster>> monsters_by_location;
+        /**
+         * Where the monsters are. A spatial index rather than a tile -> monster
+         * map; see monster_spatial_index for why. The one-monster-per-tile rule is
+         * enforced here, by @ref add and @ref update_pos, not by the container -
+         * which is the point of the swap: the rule and the storage are no longer
+         * the same thing, so the rule can go on its own later.
+         */
+        monster_spatial_index monsters_by_location;  // NOLINT(cata-serialize)
 
         /**
          * Creatures that get removed via @ref remove are stored here until the end of the turn.

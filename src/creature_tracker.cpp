@@ -34,14 +34,18 @@ creature_tracker::~creature_tracker() = default;
 
 shared_ptr_fast<monster> creature_tracker::find( const tripoint_abs_ms &pos ) const
 {
-    const auto iter = monsters_by_location.find( pos );
-    if( iter != monsters_by_location.end() ) {
-        const shared_ptr_fast<monster> &mon_ptr = iter->second;
-        if( !mon_ptr->is_dead() ) {
-            return mon_ptr;
+    if( const shared_ptr_fast<monster> *mon_ptr = monsters_by_location.find( pos ) ) {
+        if( !( *mon_ptr )->is_dead() ) {
+            return *mon_ptr;
         }
     }
     return nullptr;
+}
+
+std::vector<monster *> creature_tracker::monsters_overlapping( const tripoint_abs_ms_f &centre,
+        const double radius ) const
+{
+    return monsters_by_location.overlapping( centre, radius );
 }
 
 int creature_tracker::temporary_id( const monster &critter ) const
@@ -93,7 +97,7 @@ bool creature_tracker::add( const shared_ptr_fast<monster> &critter_ptr )
     }
 
     monsters_list.emplace_back( critter_ptr );
-    monsters_by_location[critter.pos_abs()] = critter_ptr;
+    monsters_by_location.insert( critter.pos_abs(), critter_ptr );
     return true;
 }
 
@@ -131,7 +135,7 @@ bool creature_tracker::update_pos( const monster &critter, const tripoint_abs_ms
     } );
     if( iter != monsters_list.end() ) {
         monsters_by_location.erase( old_pos );
-        monsters_by_location[new_pos] = *iter;
+        monsters_by_location.insert( new_pos, *iter );
         return true;
     } else {
         // We're changing the x/y/z coordinates of a zombie that hasn't been added
@@ -146,21 +150,13 @@ bool creature_tracker::update_pos( const monster &critter, const tripoint_abs_ms
 
 void creature_tracker::remove_from_location_map( const monster &critter )
 {
-    const auto pos_iter = monsters_by_location.find( critter.pos_abs() );
-    if( pos_iter != monsters_by_location.end() && pos_iter->second.get() == &critter ) {
-        monsters_by_location.erase( pos_iter );
+    if( monsters_by_location.erase( critter.pos_abs(), critter ) ) {
         return;
     }
 
-    // When it's not in the map at its current location, it might still be there under,
-    // another location, so look for it.
-    const auto iter = std::find_if( monsters_by_location.begin(), monsters_by_location.end(),
-    [&]( const decltype( monsters_by_location )::value_type & v ) {
-        return v.second.get() == &critter;
-    } );
-    if( iter != monsters_by_location.end() ) {
-        monsters_by_location.erase( iter );
-    }
+    // When it's not in the index at its current location, it might still be there
+    // under another location, so look for it.
+    monsters_by_location.erase_anywhere( critter );
 }
 
 void creature_tracker::remove( const monster &critter )
@@ -192,17 +188,17 @@ void creature_tracker::rebuild_cache()
 {
     monsters_by_location.clear();
     for( const shared_ptr_fast<monster> &mon_ptr : monsters_list ) {
-        monsters_by_location[mon_ptr->pos_abs()] = mon_ptr;
+        monsters_by_location.insert( mon_ptr->pos_abs(), mon_ptr );
     }
 }
 
 bool creature_tracker::is_present( Creature *creature ) const
 {
     if( creature->is_monster() ) {
-        if( const auto iter = monsters_by_location.find( creature->pos_abs() );
-            iter != monsters_by_location.end() ) {
-            if( static_cast<const Creature *>( iter->second.get() ) == creature ) {
-                return !iter->second->is_dead();
+        if( const shared_ptr_fast<monster> *mon_ptr = monsters_by_location.find(
+                    creature->pos_abs() ) ) {
+            if( static_cast<const Creature *>( mon_ptr->get() ) == creature ) {
+                return !( *mon_ptr )->is_dead();
             }
         }
     } else if( creature->is_avatar() ) {
@@ -228,20 +224,19 @@ void creature_tracker::swap_positions( monster &first, monster &second )
     }
 
     // Either of them may be invalid!
-    const auto first_iter = monsters_by_location.find( first.pos_abs() );
-    const auto second_iter = monsters_by_location.find( second.pos_abs() );
-    // implied: first_iter != second_iter
-
+    // The entries have to come out before either monster moves: they are filed by
+    // position, so moving first would leave them filed under tiles neither monster
+    // is on any more. Copy the pointers out, then put them back at the new tiles.
     shared_ptr_fast<monster> first_ptr;
-    if( first_iter != monsters_by_location.end() ) {
-        first_ptr = first_iter->second;
-        monsters_by_location.erase( first_iter );
+    if( const shared_ptr_fast<monster> *filed = monsters_by_location.find( first.pos_abs() ) ) {
+        first_ptr = *filed;
+        monsters_by_location.erase( first.pos_abs() );
     }
 
     shared_ptr_fast<monster> second_ptr;
-    if( second_iter != monsters_by_location.end() ) {
-        second_ptr = second_iter->second;
-        monsters_by_location.erase( second_iter );
+    if( const shared_ptr_fast<monster> *filed = monsters_by_location.find( second.pos_abs() ) ) {
+        second_ptr = *filed;
+        monsters_by_location.erase( second.pos_abs() );
     }
     // implied: (first_ptr != second_ptr) or (first_ptr == nullptr && second_ptr == nullptr)
 
@@ -249,12 +244,12 @@ void creature_tracker::swap_positions( monster &first, monster &second )
     second.spawn( first.pos_abs() );
     first.spawn( temp );
 
-    // If the pointers have been taken out of the list, put them back in.
+    // If the pointers have been taken out of the index, put them back in.
     if( first_ptr ) {
-        monsters_by_location[first.pos_abs()] = first_ptr;
+        monsters_by_location.insert( first.pos_abs(), first_ptr );
     }
     if( second_ptr ) {
-        monsters_by_location[second.pos_abs()] = second_ptr;
+        monsters_by_location.insert( second.pos_abs(), second_ptr );
     }
 }
 
