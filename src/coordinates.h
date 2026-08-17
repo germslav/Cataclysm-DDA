@@ -128,10 +128,22 @@ class coord_point_mut : public coord_point_base<Point>
         explicit constexpr coord_point_mut( const Point &p ) : base( p ) {}
         template <typename T>
         constexpr coord_point_mut( const Subpoint &p, T z ) : base( p.raw(), z ) {}
-        template<typename T>
-        constexpr coord_point_mut( T x, T y ) : base( x, y ) {}
-        template<typename T>
-        constexpr coord_point_mut( T x, T y, T z ) : base( x, y, z ) {}
+        // RT fork: one template parameter per axis rather than a single T shared
+        // by all of them. Continuous points carry double x/y with an integral z
+        // (z-levels are discrete floors), so a shared T cannot be deduced from
+        // (double, double, int).
+        //
+        // The arithmetic constraint is not decoration. Without it the two-argument
+        // form matches (Subpoint, z) calls exactly and outranks the (const Subpoint &,
+        // T z) overload above, which needs a conversion - the shared-T requirement
+        // used to rule that out implicitly. Coordinates are numbers; say so.
+        template<typename X, typename Y,
+                 std::enable_if_t < std::is_arithmetic_v<X> &&std::is_arithmetic_v<Y>, int > = 0 >
+        constexpr coord_point_mut( X x, Y y ) : base( x, y ) {}
+        template < typename X, typename Y, typename Z,
+                   std::enable_if_t < std::is_arithmetic_v<X> &&std::is_arithmetic_v<Y> &&
+                                      std::is_arithmetic_v<Z>, int > = 0 >
+        constexpr coord_point_mut( X x, Y y, Z z ) : base( x, y, z ) {}
 
         // TODO: move the const accessors into base when cata-unsequenced-calls is fixed.
         constexpr const Point &raw() const {
@@ -226,12 +238,16 @@ class coord_point_ob : public
         using this_as_ob = coord_point_ob<Point, Origin, Scale>;
         using this_as_tripoint_ob = coord_point_ob<tripoint, Origin, Scale>;
 
-        template <typename T>
-        static constexpr coord_point_ob make_unchecked( T x, T y ) {
+        // RT fork: per-axis template parameters, see coord_point_mut above.
+        template < typename X, typename Y,
+                   std::enable_if_t < std::is_arithmetic_v<X> &&std::is_arithmetic_v<Y>, int > = 0 >
+        static constexpr coord_point_ob make_unchecked( X x, Y y ) {
             return coord_point_ob( x, y );
         }
-        template <typename T>
-        static constexpr coord_point_ob make_unchecked( T x, T y, T z ) {
+        template < typename X, typename Y, typename Z,
+                   std::enable_if_t < std::is_arithmetic_v<X> &&std::is_arithmetic_v<Y> &&
+                                      std::is_arithmetic_v<Z>, int > = 0 >
+        static constexpr coord_point_ob make_unchecked( X x, Y y, Z z ) {
             return coord_point_ob( x, y, z );
         }
         static constexpr coord_point_ob make_unchecked( const base &other ) {
@@ -371,12 +387,16 @@ class coord_point_ib : public coord_point_ob<Point, Origin, Scale>
         // Explicit functions to construct inbounds versions without doing any
         // bounds checking. Only use these with a very good reason, when you
         // are completely sure the result will be inbounds.
-        template <typename T>
-        static constexpr coord_point_ib make_unchecked( T x, T y ) {
+        // RT fork: per-axis template parameters, see coord_point_mut above.
+        template < typename X, typename Y,
+                   std::enable_if_t < std::is_arithmetic_v<X> &&std::is_arithmetic_v<Y>, int > = 0 >
+        static constexpr coord_point_ib make_unchecked( X x, Y y ) {
             return coord_point_ib( x, y );
         }
-        template <typename T>
-        static constexpr coord_point_ib make_unchecked( T x, T y, T z ) {
+        template < typename X, typename Y, typename Z,
+                   std::enable_if_t < std::is_arithmetic_v<X> &&std::is_arithmetic_v<Y> &&
+                                      std::is_arithmetic_v<Z>, int > = 0 >
+        static constexpr coord_point_ib make_unchecked( X x, Y y, Z z ) {
             return coord_point_ib( x, y, z );
         }
         static constexpr coord_point_ib make_unchecked( const base &other ) {
