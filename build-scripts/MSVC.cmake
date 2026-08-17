@@ -51,7 +51,12 @@ add_compile_options(
     /wd26495 # uninitialized mamber
     /WX-     # do not tread warnings as errors
     /W1      # warning level
-    /TP      # every source file is a C++ file
+    # RT fork: /TP was applied to every language, which breaks CMake's C compiler
+    # ABI probe (testCCompiler.c carries an #error that fires when __cplusplus is
+    # defined) and silently compiled src/third-party/zstd's C sources as C++.
+    # Upstream never hits this because the Visual Studio generator skips the probe;
+    # Ninja runs it. Scoping to CXX is a no-op for C++ and lets zstd build as C.
+    $<$<COMPILE_LANGUAGE:CXX>:/TP>      # every C++ source file is a C++ file
     /Zc:forScope # force conformace in for loop scope
     /Zc:inline   # remove unreferenced COMDAT
     /Zc:wchar_t  # wchar_t is native type
