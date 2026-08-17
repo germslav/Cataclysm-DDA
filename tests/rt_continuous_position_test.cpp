@@ -4,6 +4,7 @@
 #include "cata_catch.h"
 #include "coordinates.h"
 #include "creature.h"
+#include "creature_tracker.h"
 #include "map.h"
 #include "map_helpers.h"
 #include "monster.h"
@@ -14,9 +15,12 @@
 
 // The RT fork stores creature positions continuously. Everything downstream -
 // collision, combat geometry, rendering - assumes the continuous position and
-// the integer position never disagree about which tile a creature is in. These
-// tests pin that invariant down while the integer position is still the
-// authority, so that when the roles swap the expectations are already recorded.
+// the integer position never disagree about which tile a creature is in.
+//
+// The continuous position is now the authority and the integer one is projected
+// from it, so these tests cover both directions: that the projection lands on the
+// right tile, and that the sub-tile part is storage rather than something the
+// accessors round away.
 
 static const mtype_id pseudo_debug_mon( "pseudo_debug_mon" );
 
@@ -95,13 +99,44 @@ TEST_CASE( "creature_continuous_position_agrees_with_tile_position", "[rt][coord
         CHECK( to_tile( u.pos_abs_f() ) == u.pos_abs() );
         CHECK( to_tile( u.pos_bub_f() ) == u.pos_bub() );
 
-        // While the integer position is still the authority, a creature sits at
-        // the centre of its tile, so rendering offsets are zero and the picture
-        // is unchanged.
+        // The integer setters name a tile, so they place the creature at its
+        // centre: rendering offsets are zero and the picture is unchanged from
+        // the tile-only renderer.
         const point_f off = offset_from_tile_centre( u.pos_abs_f() );
         CHECK( off.x == Approx( 0.0 ) );
         CHECK( off.y == Approx( 0.0 ) );
     }
+}
+
+TEST_CASE( "creature_keeps_a_sub_tile_position", "[rt][coords]" )
+{
+    clear_map();
+    avatar &u = get_avatar();
+    map &here = get_map();
+
+    // The point of the flip: a position between tiles survives being stored and
+    // read back, instead of being rounded to the tile the creature is nearest.
+    const tripoint_bub_ms_f p( 60.25, 61.75, 0 );
+    u.setpos_f( here, p );
+
+    CHECK( u.pos_bub_f().x() == Approx( 60.25 ) );
+    CHECK( u.pos_bub_f().y() == Approx( 61.75 ) );
+    // Occupancy is floor(), so this is tile (60, 61) - not the nearest tile.
+    CHECK( u.pos_bub() == tripoint_bub_ms( 60, 61, 0 ) );
+    CHECK( u.pos_abs() == here.get_abs( tripoint_bub_ms( 60, 61, 0 ) ) );
+    CHECK( to_tile( u.pos_abs_f() ) == u.pos_abs() );
+
+    // What the renderer displaces the sprite by: a quarter tile west, a quarter
+    // tile south of the tile centre.
+    const point_f off = offset_from_tile_centre( u.pos_abs_f() );
+    CHECK( off.x == Approx( -0.25 ) );
+    CHECK( off.y == Approx( 0.25 ) );
+
+    // Naming a tile still means the centre of that tile - the integer setters are
+    // placement, not kinematics, and must not leave a stale fraction behind.
+    u.setpos( here, tripoint_bub_ms( 60, 61, 0 ) );
+    CHECK( u.pos_bub_f().x() == Approx( 60.5 ) );
+    CHECK( u.pos_bub_f().y() == Approx( 61.5 ) );
 }
 
 TEST_CASE( "monster_continuous_position_agrees_with_tile_position", "[rt][coords]" )
@@ -120,4 +155,29 @@ TEST_CASE( "monster_continuous_position_agrees_with_tile_position", "[rt][coords
     CHECK( mon.pos_bub() == moved );
     CHECK( to_tile( mon.pos_abs_f() ) == mon.pos_abs() );
     CHECK( to_tile( mon.pos_bub_f() ) == mon.pos_bub() );
+}
+
+TEST_CASE( "sub_tile_movement_keeps_the_monster_where_the_tracker_expects_it", "[rt][coords]" )
+{
+    clear_map();
+    map &here = get_map();
+    creature_tracker &tracker = get_creature_tracker();
+
+    const tripoint_bub_ms start( 62, 62, 0 );
+    monster &mon = spawn_test_monster( pseudo_debug_mon.str(), start );
+
+    // The tracker is keyed by tile, so a step that stays inside one tile must not
+    // touch it - and must not silently drop the monster out of it either.
+    mon.setpos_f( here, tripoint_bub_ms_f( 62.9, 62.1, 0 ) );
+    CHECK( mon.pos_bub() == start );
+    CHECK( tracker.creature_at<monster>( start ) == &mon );
+    CHECK( mon.pos_bub_f().x() == Approx( 62.9 ) );
+
+    // Crossing the boundary is an ordinary move as far as the tracker is
+    // concerned, even though the creature travelled a fifth of a tile.
+    const tripoint_bub_ms next( 63, 62, 0 );
+    mon.setpos_f( here, tripoint_bub_ms_f( 63.1, 62.1, 0 ) );
+    CHECK( mon.pos_bub() == next );
+    CHECK( tracker.creature_at<monster>( next ) == &mon );
+    CHECK( tracker.creature_at<monster>( start ) == nullptr );
 }

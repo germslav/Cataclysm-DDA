@@ -187,7 +187,8 @@ Creature::Creature()
     killer = nullptr;
     speed_base = 100;
     underwater = false;
-    location = tripoint_abs_ms( 20, 10, -500 ); // Some arbitrary position that will cause debugmsgs
+    // Some arbitrary position that will cause debugmsgs
+    location = tile_centre( tripoint_abs_ms( 20, 10, -500 ) );
 
     Creature::reset_bonuses();
 
@@ -203,12 +204,12 @@ Creature::~Creature() = default;
 
 tripoint_bub_ms Creature::pos_bub() const
 {
-    return get_map().get_bub( location );
+    return get_map().get_bub( pos_abs() );
 }
 
 tripoint_bub_ms Creature::pos_bub( const map &here ) const
 {
-    return here.get_bub( location );
+    return here.get_bub( pos_abs() );
 }
 
 void Creature::setpos( map &here, const tripoint_bub_ms &p, bool check_gravity/* = true*/ )
@@ -228,6 +229,26 @@ void Creature::setpos( const tripoint_abs_ms &p, bool check_gravity/* = true*/ )
     on_move( old_loc );
     if( check_gravity ) {
         gravity_check();
+    }
+}
+
+void Creature::setpos_f( map &here, const tripoint_bub_ms_f &p, bool check_gravity/* = true*/ )
+{
+    const tripoint_abs_ms old_loc = pos_abs();
+    const tripoint_bub_ms tile = to_tile( p );
+    // Go through the map's own bub->abs transform for the tile and carry the
+    // sub-tile part across untouched, so there is one definition of that
+    // transform rather than a second, continuous one that could drift from it.
+    const point_f frac = tile_fraction( p );
+    const tripoint_abs_ms abs_tile = here.get_abs( tile );
+    set_pos_abs_f_only( tripoint_abs_ms_f( abs_tile.x() + frac.x, abs_tile.y() + frac.y,
+                                           abs_tile.z() ) );
+    // on_move takes tile positions: a step that stays inside one tile is not a
+    // move as far as the trackers, the overmap or the light caches are concerned,
+    // and the handlers already return early when the tile is unchanged.
+    on_move( old_loc );
+    if( check_gravity ) {
+        gravity_check( &here );
     }
 }
 
@@ -305,14 +326,17 @@ void Creature::move_to( const tripoint_abs_ms &loc )
 
 void Creature::set_pos_bub_only( const map &here, const tripoint_bub_ms &p )
 {
-    location = here.get_abs( p );
-    location_f = tile_centre( location );
+    set_pos_abs_f_only( tile_centre( here.get_abs( p ) ) );
 }
 
 void Creature::set_pos_abs_only( const tripoint_abs_ms &loc )
 {
+    set_pos_abs_f_only( tile_centre( loc ) );
+}
+
+void Creature::set_pos_abs_f_only( const tripoint_abs_ms_f &loc )
+{
     location = loc;
-    location_f = tile_centre( location );
 }
 
 void Creature::on_move( const tripoint_abs_ms & ) {}
@@ -3535,12 +3559,12 @@ void Creature::load_hit_range( const JsonObject &jo )
 
 tripoint_abs_ms Creature::pos_abs() const
 {
-    return location;
+    return to_tile( location );
 }
 
 const tripoint_abs_ms_f &Creature::pos_abs_f() const
 {
-    return location_f;
+    return location;
 }
 
 tripoint_bub_ms_f Creature::pos_bub_f() const
@@ -3553,19 +3577,19 @@ tripoint_bub_ms_f Creature::pos_bub_f( const map &here ) const
     // Convert the tile through the map's own abs->bub transform, then put the
     // sub-tile part back. Doing it this way means there is exactly one definition
     // of that transform, rather than a second continuous one that could drift.
-    const tripoint_bub_ms tile = here.get_bub( location );
-    const point_f frac = tile_fraction( location_f );
+    const tripoint_bub_ms tile = here.get_bub( pos_abs() );
+    const point_f frac = tile_fraction( location );
     return tripoint_bub_ms_f( tile.x() + frac.x, tile.y() + frac.y, tile.z() );
 }
 
 tripoint_abs_sm Creature::pos_abs_sm() const
 {
-    return project_to<coords::sm>( location );
+    return project_to<coords::sm>( pos_abs() );
 }
 
 tripoint_abs_omt Creature::pos_abs_omt() const
 {
-    return project_to<coords::omt>( location );
+    return project_to<coords::omt>( pos_abs() );
 }
 
 std::unique_ptr<talker> get_talker_for( Creature &me )

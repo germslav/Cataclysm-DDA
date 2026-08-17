@@ -3821,7 +3821,16 @@ void faction::serialize( JsonOut &json ) const
 
 void Creature::store( JsonOut &jsout ) const
 {
-    jsout.member( "location", location );
+    // RT fork: the position is continuous, but it is saved as the tile plus the
+    // sub-tile part rather than as two world-scale doubles. JsonOut writes a
+    // double through the stream's default six significant digits, which at
+    // map-square scale is coarser than a whole tile; the tile therefore stays an
+    // exact integer triple, exactly as upstream wrote it, and only the fraction -
+    // where six digits is a millionth of a tile - is written as floating point.
+    jsout.member( "location", pos_abs() );
+    const point_f frac = tile_fraction( location );
+    jsout.member( "sub_tile_x", frac.x );
+    jsout.member( "sub_tile_y", frac.y );
 
     jsout.member( "moves", moves );
     jsout.member( "pain", pain );
@@ -3868,7 +3877,16 @@ void Creature::store( JsonOut &jsout ) const
 void Creature::load( const JsonObject &jsin )
 {
     jsin.allow_omitted_members();
-    jsin.read( "location", location );
+    tripoint_abs_ms tile;
+    if( jsin.read( "location", tile ) ) {
+        // Saves written before the position became continuous have no sub-tile
+        // part; the centre of the tile is where a creature placed by tile goes.
+        double sub_x = 0.5;
+        double sub_y = 0.5;
+        jsin.read( "sub_tile_x", sub_x );
+        jsin.read( "sub_tile_y", sub_y );
+        set_pos_abs_f_only( tripoint_abs_ms_f( tile.x() + sub_x, tile.y() + sub_y, tile.z() ) );
+    }
     jsin.read( "moves", moves );
     jsin.read( "pain", pain );
 

@@ -326,6 +326,16 @@ class Creature : public viewer
         virtual void gravity_check( map *here );
         void setpos( map &here, const tripoint_bub_ms &p, bool check_gravity = true );
         void setpos( const tripoint_abs_ms &p, bool check_gravity = true );
+        /**
+         * RT fork: place the creature at a continuous position.
+         *
+         * Same side-effects as @ref setpos - the on_move() handler and the gravity
+         * check - but the sub-tile part is kept rather than snapped to the tile
+         * centre. A separate name rather than an overload: the integer types
+         * construct from braced initialiser lists all over the tree, and a
+         * continuous overload would make every such call ambiguous.
+         */
+        void setpos_f( map &here, const tripoint_bub_ms_f &p, bool check_gravity = true );
 
         /** Checks if the creature fits confortably into a given tile. */
         bool will_be_cramped_in_vehicle_tile( map &here, const tripoint_abs_ms &loc ) const;
@@ -800,27 +810,38 @@ class Creature : public viewer
          * regular movement and vision. **/
         int reachable_zone = 0;
 
-        /** The creature's position in absolute coordinates */
-        tripoint_abs_ms location;
         /**
-         * RT fork: the same position, continuous.
+         * The creature's position in absolute coordinates, continuous.
          *
-         * Still a mirror of @ref location, kept in sync by the two setters below,
-         * which are the only writers - @ref location is private precisely so that
-         * stays true. Consumers of exact geometry (rendering, and later collision
-         * and combat) read this; everything asking "which tile is this creature in"
-         * keeps reading @ref location. In a later stage the roles swap and this
-         * becomes the authority.
+         * RT fork: this is the authority. @ref pos_abs and @ref pos_bub project it
+         * onto the tile grid with floor(); they are derived views, not storage, so
+         * a creature standing between tiles is representable rather than rounded
+         * away. The map itself stays voxel data - terrain, fields, items and the
+         * caches are all per-tile - and sampling it at floor(position) is what any
+         * continuous game on a tile world does.
          *
-         * A creature occupying tile n sits at its centre, n + 0.5, so the offset
-         * from the tile centre is zero and rendering is unchanged.
+         * Private with exactly one writer, @ref set_pos_abs_f_only: the integer
+         * setters funnel through it rather than assigning here, so there is a
+         * single place where a position comes into existence.
+         *
+         * Tile n is the interval [n, n+1), so a creature placed on tile n by the
+         * integer setters sits at its centre, n + 0.5, and its offset from the
+         * tile centre - what the renderer displaces by - is zero.
          */
-        tripoint_abs_ms_f location_f = tile_centre( tripoint_abs_ms::zero );
+        tripoint_abs_ms_f location = tile_centre( tripoint_abs_ms::zero );
     protected:
         // Sets the creature's position without any side-effects.
         void set_pos_bub_only( const map &here, const tripoint_bub_ms &p );
         // Sets the creature's position without any side-effects.
         void set_pos_abs_only( const tripoint_abs_ms &loc );
+        /**
+         * Sets the continuous position without any side-effects.
+         *
+         * The only writer of @ref location. The integer setters above place the
+         * creature at the centre of the named tile; this one keeps whatever
+         * sub-tile position it is given, which is what kinematics needs.
+         */
+        void set_pos_abs_f_only( const tripoint_abs_ms_f &loc );
         // Invoked when the creature's position changes.
         virtual void on_move( const tripoint_abs_ms &old_pos );
         /**anatomy is the plan of the creature's body*/
@@ -1327,12 +1348,17 @@ class Creature : public viewer
         /**
          * Returns the location of the creature in map square coordinates (the most detailed
          * coordinate system), relative to a fixed global point of origin.
+         *
+         * RT fork: this is the tile the creature occupies, computed from the
+         * continuous position, not stored. Repeated calls are cheap but no longer
+         * free; hoist it out of a loop if the position cannot change inside one.
          */
         tripoint_abs_ms pos_abs() const;
         /**
-         * RT fork: the continuous position, for consumers of exact geometry.
+         * RT fork: the continuous position - the stored one, for consumers of exact
+         * geometry.
          *
-         * Rounds to exactly @ref pos_abs by construction. Use this for rendering,
+         * Projects to exactly @ref pos_abs by construction. Use this for rendering,
          * collision and combat geometry; use @ref pos_abs for map, terrain and
          * pathfinding queries, which are inherently per-tile.
          */
