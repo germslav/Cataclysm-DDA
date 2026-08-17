@@ -44,6 +44,13 @@ $outTxt   = if ($Baseline) { $BaselineTxt } else { Join-Path $ResultsDir "run-$s
 $outStats = [System.IO.Path]::ChangeExtension($outXml, ".stats.tsv")
 $userDir  = Join-Path $env:TEMP "cdda-rt-test-user\"
 
+# Wiped before the run, not after: the game leaves its test world behind on purpose
+# so a failure can be inspected, and that is worth keeping - but only until the next
+# run. A world that survives into the next run is state the tests did not create,
+# and tests that generate or load map chunks then do a different amount of work
+# depending on what an earlier run happened to leave lying around.
+if (Test-Path $userDir) { Remove-Item -Recurse -Force $userDir }
+
 # Catch2 must run with the repo root as the working directory so the game finds data/.
 Push-Location $RepoRoot
 try {
