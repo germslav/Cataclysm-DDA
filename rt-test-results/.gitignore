@@ -1,0 +1,3 @@
+# Ad-hoc runs are throwaway; the S0b baseline is a reference artifact and is committed.
+run-*.xml
+run-*.txt
