@@ -10,15 +10,8 @@
           "name": "sdl2-image",
           "features": [ "libjpeg-turbo" ]
         },
-        {
-          "name": "sdl2-mixer",
-          "features": [ "libflac", "mpg123", "libmodplug" ]
-        },
         "sdl2-ttf",
-        {
-          "name": "pdcurses",
-          "version>=": "3.9#4"
-        }
+        "zlib"
     ],
     "builtin-baseline": "3acb7541e854452d33f71037a8f63a88899e63d3"
 }
