@@ -276,6 +276,48 @@ using tripoint_abs_ms_f = coords::coord_point<tripoint_f, coords::origin::abs, c
 using tripoint_bub_ms_f =
     coords::coord_point<tripoint_f, coords::origin::reality_bubble, coords::ms>;
 
+/** @copydoc to_tile(const tripoint_f &) */
+template<coords::origin Origin>
+inline coords::coord_point_ob<tripoint, Origin, coords::ms>
+to_tile( const coords::coord_point_ob<tripoint_f, Origin, coords::ms> &p )
+{
+    return coords::coord_point_ob<tripoint, Origin, coords::ms>( to_tile( p.raw() ) );
+}
+
+/** @copydoc tile_centre(const tripoint &) */
+template<coords::origin Origin>
+inline coords::coord_point_ob<tripoint_f, Origin, coords::ms>
+tile_centre( const coords::coord_point_ob<tripoint, Origin, coords::ms> &p )
+{
+    return coords::coord_point_ob<tripoint_f, Origin, coords::ms>( tile_centre( p.raw() ) );
+}
+
+/** @copydoc tile_fraction(const tripoint_f &) */
+template<coords::origin Origin>
+inline point_f tile_fraction( const coords::coord_point_ob<tripoint_f, Origin, coords::ms> &p )
+{
+    return tile_fraction( p.raw() );
+}
+
+/**
+ * Offset of a continuous position from the centre of the tile it occupies,
+ * each component in [-0.5, 0.5). This, not the raw fraction, is what a renderer
+ * wants: a creature standing in the middle of its tile yields zero offset and
+ * draws exactly where the integer-only renderer would put it.
+ */
+inline point_f offset_from_tile_centre( const tripoint_f &p )
+{
+    const point_f frac = tile_fraction( p );
+    return point_f( frac.x - 0.5, frac.y - 0.5 );
+}
+
+template<coords::origin Origin>
+inline point_f offset_from_tile_centre(
+    const coords::coord_point_ob<tripoint_f, Origin, coords::ms> &p )
+{
+    return offset_from_tile_centre( p.raw() );
+}
+
 inline constexpr const point_f point_f::zero{};
 inline constexpr const point_f point_f::min = { -HUGE_VAL, -HUGE_VAL };
 inline constexpr const point_f point_f::max = { HUGE_VAL, HUGE_VAL };

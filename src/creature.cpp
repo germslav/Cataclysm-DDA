@@ -306,11 +306,13 @@ void Creature::move_to( const tripoint_abs_ms &loc )
 void Creature::set_pos_bub_only( const map &here, const tripoint_bub_ms &p )
 {
     location = here.get_abs( p );
+    location_f = tile_centre( location );
 }
 
 void Creature::set_pos_abs_only( const tripoint_abs_ms &loc )
 {
     location = loc;
+    location_f = tile_centre( location );
 }
 
 void Creature::on_move( const tripoint_abs_ms & ) {}
@@ -3534,6 +3536,26 @@ void Creature::load_hit_range( const JsonObject &jo )
 tripoint_abs_ms Creature::pos_abs() const
 {
     return location;
+}
+
+const tripoint_abs_ms_f &Creature::pos_abs_f() const
+{
+    return location_f;
+}
+
+tripoint_bub_ms_f Creature::pos_bub_f() const
+{
+    return pos_bub_f( get_map() );
+}
+
+tripoint_bub_ms_f Creature::pos_bub_f( const map &here ) const
+{
+    // Convert the tile through the map's own abs->bub transform, then put the
+    // sub-tile part back. Doing it this way means there is exactly one definition
+    // of that transform, rather than a second continuous one that could drift.
+    const tripoint_bub_ms tile = here.get_bub( location );
+    const point_f frac = tile_fraction( location_f );
+    return tripoint_bub_ms_f( tile.x() + frac.x, tile.y() + frac.y, tile.z() );
 }
 
 tripoint_abs_sm Creature::pos_abs_sm() const

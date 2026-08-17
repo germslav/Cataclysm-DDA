@@ -28,6 +28,7 @@
 #include "global_vars.h"
 #include "math_parser_diag_value.h"
 #include "pimpl.h"
+#include "point_float.h"
 #include "string_formatter.h"
 #include "type_id.h"
 #include "units_fwd.h"
@@ -801,6 +802,20 @@ class Creature : public viewer
 
         /** The creature's position in absolute coordinates */
         tripoint_abs_ms location;
+        /**
+         * RT fork: the same position, continuous.
+         *
+         * Still a mirror of @ref location, kept in sync by the two setters below,
+         * which are the only writers - @ref location is private precisely so that
+         * stays true. Consumers of exact geometry (rendering, and later collision
+         * and combat) read this; everything asking "which tile is this creature in"
+         * keeps reading @ref location. In a later stage the roles swap and this
+         * becomes the authority.
+         *
+         * A creature occupying tile n sits at its centre, n + 0.5, so the offset
+         * from the tile centre is zero and rendering is unchanged.
+         */
+        tripoint_abs_ms_f location_f = tile_centre( tripoint_abs_ms::zero );
     protected:
         // Sets the creature's position without any side-effects.
         void set_pos_bub_only( const map &here, const tripoint_bub_ms &p );
@@ -1314,6 +1329,18 @@ class Creature : public viewer
          * coordinate system), relative to a fixed global point of origin.
          */
         tripoint_abs_ms pos_abs() const;
+        /**
+         * RT fork: the continuous position, for consumers of exact geometry.
+         *
+         * Rounds to exactly @ref pos_abs by construction. Use this for rendering,
+         * collision and combat geometry; use @ref pos_abs for map, terrain and
+         * pathfinding queries, which are inherently per-tile.
+         */
+        const tripoint_abs_ms_f &pos_abs_f() const;
+        /** @copydoc pos_abs_f() */
+        tripoint_bub_ms_f pos_bub_f() const;
+        /** @copydoc pos_abs_f() */
+        tripoint_bub_ms_f pos_bub_f( const map &here ) const;
         /**
          * Returns the location of the creature in global submap coordinates.
          */
